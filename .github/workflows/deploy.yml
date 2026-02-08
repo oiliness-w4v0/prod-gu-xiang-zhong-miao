@@ -59,7 +59,7 @@ jobs:
           strip_components: 1
 
       # 6. 激活版本并清理旧版本
-      - name: Activate release and Cleanup
+      - name: Activate release
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -68,11 +68,17 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           script: |
             PROJECT_ROOT=/var/www/yxswy
-            NEW_RELEASE=$PROJECT_ROOT/releases/${{ github.sha }}
+            RELEASE_PATH=$PROJECT_ROOT/releases/${{ github.sha }}
             CURRENT_LINK=$PROJECT_ROOT/current
 
-            # 更新软链接：将 current 指向最新的 release
-            ln -sfn $NEW_RELEASE $CURRENT_LINK
+            # 关键修复逻辑：
+            # 1. 如果 current 是个普通文件夹而不是链接，先删掉它
+            if [ -d "$CURRENT_LINK" ] && [ ! -L "$CURRENT_LINK" ]; then
+                rm -rf $CURRENT_LINK
+            fi
 
-            # 保持历史记录：只保留最近的 5 个版本，防止磁盘爆满
-            cd $PROJECT_ROOT/releases && ls -t | tail -n +6 | xargs rm -rf
+            # 2. 强制创建软链接
+            ln -sfn $RELEASE_PATH $CURRENT_LINK
+            
+            # 3. 确保权限正确
+            sudo chown -R www-data:www-data $PROJECT_ROOT

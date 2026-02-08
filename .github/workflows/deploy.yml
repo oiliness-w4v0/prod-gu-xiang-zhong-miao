@@ -1,0 +1,78 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches:
+      - main  # 只有 main 分支有代码提交时才触发部署
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取代码
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. 安装 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18' # 根据你项目调整版本
+
+      # 3. 安装依赖并打包
+      - name: Install and Build
+        run: |
+          npm install
+          npm run build
+
+      # 4. 部署到服务器
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            # 定义版本号（使用时间戳）
+            RELEASE_NAME=$(date +%Y%m%d%H%M%S)
+            RELEASE_PATH=/var/www/yxswy/releases/$RELEASE_NAME
+            
+            # 创建新版本的文件夹
+            mkdir -p $RELEASE_PATH
+
+            # 这里的逻辑是：通过 scp 将打包好的 dist 传上去
+            # 但因为 ssh-action 是运行远程命令，我们配合使用 appleboy/scp-action 更方便
+            # 或者直接在远程创建一个临时目录接收文件
+
+      # 5. 上传文件 (使用专门的 SCP Action)
+      - name: Upload dist files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: "dist/*"
+          target: "/var/www/yxswy/releases/${{ github.sha }}" # 使用 Git Commit ID 作为临时目录名
+          strip_components: 1
+
+      # 6. 激活版本并清理旧版本
+      - name: Activate release and Cleanup
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            PROJECT_ROOT=/var/www/yxswy
+            NEW_RELEASE=$PROJECT_ROOT/releases/${{ github.sha }}
+            CURRENT_LINK=$PROJECT_ROOT/current
+
+            # 更新软链接：将 current 指向最新的 release
+            ln -sfn $NEW_RELEASE $CURRENT_LINK
+
+            # 保持历史记录：只保留最近的 5 个版本，防止磁盘爆满
+            cd $PROJECT_ROOT/releases && ls -t | tail -n +6 | xargs rm -rf
